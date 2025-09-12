@@ -38,7 +38,7 @@ class AutoMoveApp:
         top_frame = tb.Frame(self.root)
         top_frame.pack(pady=5, anchor='w', padx=10, fill='x')
         tb.Button(top_frame, text="列出清單", command=self.list_files).pack(side=LEFT, padx=5)
-        tb.Button(top_frame, text="移動", command=self.move_files).pack(side=LEFT, padx=5)
+        tb.Button(top_frame, text="移動", command=self.move_files, bootstyle="success").pack(side=LEFT, padx=5)
         kind_box = tb.Combobox(top_frame, textvariable=self.kind_var, width=3, values=[str(i) for i in range(1, 21)])
         kind_box.pack(side=LEFT, padx=(5, 0))
         kind_box.bind("<<ComboboxSelected>>", self.update_dynamic_fields)
@@ -63,7 +63,7 @@ class AutoMoveApp:
 
         # row 0 下方新增獨立欄位 "0."
         zero_frame = tb.Frame(self.root)
-        zero_frame.pack(anchor='w', padx=10, pady=(0, 2))
+        zero_frame.pack(anchor='w', padx=10, pady=(0, 0))  # ← 將 pady=(0, 2) 改為 (0, 0) 讓 0. 和 1. 更接近
         tb.Label(zero_frame, text="0.", width=4, anchor='w').pack(side=LEFT, padx=(0, 5))
         self.all_var = tk.BooleanVar(value=False)
         all_check = tb.Checkbutton(zero_frame, variable=self.all_var, text="全部", bootstyle="success")
@@ -95,8 +95,8 @@ class AutoMoveApp:
         tb.Button(source_row, text="存檔", command=self.save_settings, bootstyle="warning").pack(side=LEFT, padx=5)
 
         # row 5: 日誌視窗
-        self.log_display = tb.Text(self.root, height=30, width=48, font=self.font, wrap='word')
-        self.log_display.pack(pady=10, padx=10)
+        self.log_display = tb.Text(self.root, height=10, width=70, font=self.font, wrap='word')  # ← 增加日誌顯示框寬度
+        self.log_display.pack(pady=10, padx=10, fill='x')  # ← 讓日誌框更靠近主程式邊框
         self.log_display.config(xscrollcommand=lambda *args: None)
 
         # row 6: 進度條
@@ -129,12 +129,11 @@ class AutoMoveApp:
             row_dest.pack(anchor='w', pady=2)
             label_text = f"{i+1}.".ljust(4)
             tb.Label(row_dest, text=label_text, width=4, anchor='w').pack(side=LEFT, padx=(0, 5))
-            entry_ext = tb.Entry(row_dest, width=5, font=self.font)
+            entry_ext = tb.Entry(row_dest, width=12, font=self.font)  # ← 增加副檔名/關鍵字欄位寬度
             entry_ext.pack(side=LEFT, padx=(0, 5))
             entry_ext.bind("<ButtonPress-1>", lambda e, idx=i: self.start_drag(e, idx, "ext"))
             entry_ext.bind("<B1-Motion>", self.do_drag)
             entry_ext.bind("<ButtonRelease-1>", self.stop_drag)
-            # 新增右鍵清空功能
             entry_ext.bind("<Button-3>", lambda e, ent=entry_ext: ent.delete(0, "end"))
             self.extension_entries.append(entry_ext)
             entry_dest = tb.Entry(row_dest, width=34, font=self.font)
@@ -146,9 +145,9 @@ class AutoMoveApp:
             self.dest_entries.append(entry_dest)
             btn = tb.Button(row_dest, text="移入路徑", command=lambda e=entry_dest: self.select_dest_folder(e))
             btn.pack(side=LEFT, padx=5)
-        base_height = 420
-        extra_height = max(0, (count - 1) * 45)
-        self.root.geometry(f"720x{base_height + extra_height}")
+        # 自動調整視窗大小
+        self.root.update_idletasks()
+        self.root.geometry("")
 
     def select_source_folder(self):
         folder = filedialog.askdirectory(initialdir=self.source_entry.get())
@@ -228,15 +227,18 @@ class AutoMoveApp:
         destinations = [e.get().strip() for e in self.dest_entries]
         all_files = os.listdir(src)
         moved_files = set()
-        ext_dst_map = {}
-        for ext, dst in zip(extensions, destinations):
-            if ext and dst:
-                ext_dst_map[ext] = dst
-        # 先依副檔名移動
+        ext_dst_pairs = [(ext, dst) for ext, dst in zip(extensions, destinations) if ext and dst]
         idx = 1
         moved = failed = 0
-        for ext, dst in ext_dst_map.items():
-            files = [f for f in all_files if f.endswith(ext)]
+        total = len(all_files)
+        self.progress["maximum"] = total
+
+        for ext, dst in ext_dst_pairs:
+            # 依序處理每個條件，且只處理尚未移動過的檔案
+            if ext.startswith("."):
+                files = [f for f in all_files if f not in moved_files and f.endswith(ext)]
+            else:
+                files = [f for f in all_files if f not in moved_files and ext.lower() in f.lower()]
             for f in files:
                 try:
                     shutil.move(os.path.join(src, f), os.path.join(dst, f))
@@ -247,6 +249,9 @@ class AutoMoveApp:
                     self.log(f"{idx}－移動失敗：{f}（錯誤：{e}）")
                     failed += 1
                 idx += 1
+                self.progress["value"] = idx
+                self.root.update_idletasks()
+
         # 最後處理 ALL 欄位
         all_path = self.entry_all_path.get().strip()
         if all_path:
@@ -260,6 +265,8 @@ class AutoMoveApp:
                     self.log(f"{idx}－ALL移動失敗：{f}（錯誤：{e}）")
                     failed += 1
                 idx += 1
+                self.progress["value"] = idx
+                self.root.update_idletasks()
         self.log(f"移動完成：{moved} 成功，{failed} 失敗")
 
         # 只處理自動關閉

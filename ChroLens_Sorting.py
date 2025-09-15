@@ -9,7 +9,7 @@
 # row 4: 來源資料夾選擇（含取出位置、存檔按鈕）
 # row 5: 日誌視窗
 # row 6: 進度條
-#pyinstaller --noconsole --onefile --icon=umi_綠色.ico ChroLens_Sorting.py
+#pyinstaller --noconsole --onefile --icon=umi_綠色.ico --add-data "umi_綠色.ico;." ChroLens_Sorting.py
 import os
 import shutil
 import ttkbootstrap as tb
@@ -18,6 +18,7 @@ from tkinter import filedialog, messagebox
 import tkinter as tk
 import json
 import datetime
+import sys
 
 SETTINGS_FILE = "settings.json"
 
@@ -26,8 +27,13 @@ class AutoMoveApp:
         self.tip = None
         self.root = root
         self.root.title("ChroLens_Sorting1.0")
+        # 設定 icon，支援 PyInstaller 打包後與原始執行
         try:
-            self.root.iconbitmap("umi_綠色.ico")
+            if hasattr(sys, "_MEIPASS"):
+                icon_path = os.path.join(sys._MEIPASS, "umi_綠色.ico")
+            else:
+                icon_path = "umi_綠色.ico"
+            self.root.iconbitmap(icon_path)
         except Exception as e:
             print(f"無法載入icon: {e}")
         self.style = tb.Style("darkly")
@@ -230,7 +236,7 @@ class AutoMoveApp:
             if ext_list:
                 self.kind_var.set(str(len(ext_list)))
                 self.update_dynamic_fields()
-                # 重新帶入來源路徑到目的地欄位
+                # 重新帶入來源路徑到目的欄位
                 for entry in self.dest_entries:
                     entry.delete(0, "end")
                     entry.insert(0, path)
@@ -496,8 +502,13 @@ class AutoMoveApp:
         win.geometry("400x400")
         win.resizable(False, False)
         win.grab_set()
+        # 設定 icon，支援 PyInstaller 打包後與原始執行
         try:
-            win.iconbitmap("umi_綠色.ico")
+            if hasattr(sys, "_MEIPASS"):
+                icon_path = os.path.join(sys._MEIPASS, "umi_綠色.ico")
+            else:
+                icon_path = "umi_綠色.ico"
+            win.iconbitmap(icon_path)
         except Exception as e:
             print(f"無法載入icon: {e}")
         tb.Label(win, text="請設定執行時間 (24小時制)", font=("Microsoft JhengHei", 12)).pack(pady=(16, 8))

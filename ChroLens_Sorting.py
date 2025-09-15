@@ -27,7 +27,7 @@ class AutoMoveApp:
         self.root = root
         self.root.title("ChroLens_Sorting1.0")
         try:
-            self.root.iconbitmap("法師貓貓.ico")
+            self.root.iconbitmap("umi_綠色.ico")
         except Exception as e:
             print(f"無法載入icon: {e}")
         self.style = tb.Style("darkly")
@@ -496,7 +496,10 @@ class AutoMoveApp:
         win.geometry("400x400")
         win.resizable(False, False)
         win.grab_set()
-
+        try:
+            win.iconbitmap("umi_綠色.ico")
+        except Exception as e:
+            print(f"無法載入icon: {e}")
         tb.Label(win, text="請設定執行時間 (24小時制)", font=("Microsoft JhengHei", 12)).pack(pady=(16, 8))
 
         # 時間選擇區

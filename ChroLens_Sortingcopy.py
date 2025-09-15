@@ -9,7 +9,7 @@
 # row 4: 來源資料夾選擇（含取出位置、存檔按鈕）
 # row 5: 日誌視窗
 # row 6: 進度條
-
+#pyinstaller --noconsole --onefile --icon=umi_綠色.ico ChroLens_Sorting.py
 import os
 import shutil
 import ttkbootstrap as tb

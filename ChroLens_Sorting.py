@@ -99,12 +99,13 @@ class AutoMoveApp:
         source_row = tb.Frame(self.root)
         source_row.pack(pady=5, anchor='w', padx=10)
         self.source_entry = tb.Entry(source_row, width=28, font=self.font)
-        self.source_entry.insert(0, os.path.join(os.path.expanduser("~"), "Downloads"))
         self.source_entry.pack(side=LEFT)
-        tb.Button(source_row, text="取出位置", command=self.select_source_folder, bootstyle="danger").pack(side=LEFT, padx=5)
-        # 刪除「帶入副檔名」按鈕，將「定時執行」功能移到這裡
-        tb.Button(source_row, text="定時執行", command=self.open_schedule_window, bootstyle="info").pack(side=LEFT, padx=5)
+        self._settings_loaded = False
         tb.Button(source_row, text="存檔", command=self.save_settings, bootstyle="warning").pack(side=LEFT, padx=5)
+        # 新增「工作排程」按鈕（獨立於 source_row 下方）
+        schedule_row = tb.Frame(self.root)
+        schedule_row.pack(pady=5, anchor='w', padx=10)
+        tb.Button(schedule_row, text="工作排程", command=self.open_schedule_window, bootstyle="info").pack(side=LEFT, padx=5)
 
         # row 5: 日誌視窗
         self.log_display = tb.Text(self.root, height=10, width=70, font=self.font, wrap='word')  # ← 增加日誌顯示框寬度
@@ -117,6 +118,8 @@ class AutoMoveApp:
 
         self.update_dynamic_fields()
         self.load_settings()
+        if not self._settings_loaded:
+            self.source_entry.insert(0, os.path.join(os.path.expanduser("~"), "Downloads"))
         # 啟動時自動移動倒數（以當前來源路徑為主）
         try:
             delay = int(self.move_delay_var.get())
@@ -381,6 +384,7 @@ class AutoMoveApp:
 
     def load_settings(self):
         if not os.path.exists(SETTINGS_FILE):
+            self._settings_loaded = False
             return
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
@@ -395,11 +399,13 @@ class AutoMoveApp:
             for entry, val in zip(self.dest_entries, data.get("destinations", [])):
                 entry.delete(0, "end")
                 entry.insert(0, val)
-            if "source" in data:
+            if "source" in data and data["source"]:
                 self.source_entry.delete(0, "end")
                 self.source_entry.insert(0, data["source"])
+            self._settings_loaded = True
         except Exception as e:
             self.log(f"設定檔載入失敗：{e}")
+            self._settings_loaded = False
 
     def save_settings(self):
         try:
@@ -499,7 +505,7 @@ class AutoMoveApp:
         SCHEDULE_FILE = "schedule_times.json"
         win = tb.Toplevel(self.root)
         win.title("定時執行設定")
-        win.geometry("400x400")
+        win.geometry("400x520")  # ← 視窗高度調整為 520
         win.resizable(False, False)
         win.grab_set()
         # 設定 icon，支援 PyInstaller 打包後與原始執行
@@ -588,9 +594,15 @@ class AutoMoveApp:
     def create_windows_task(self, time_str):
         import sys
         import subprocess
-        script_path = os.path.abspath(sys.argv[0])
-        task_name = f"ChroLensSorting_{time_str.replace(':','')}"
-        cmd = f'schtasks /Create /TN "{task_name}" /SC DAILY /TR "{sys.executable} {script_path}" /ST {time_str} /F'
+        if getattr(sys, 'frozen', False):
+            # 如果是打包後的 exe
+            exe_path = sys.executable
+            cmd = f'schtasks /Create /TN "ChroLensSorting_{time_str.replace(":","")}" /SC DAILY /TR "{exe_path}" /ST {time_str} /F'
+        else:
+            # 如果是原始 py
+            exe_path = sys.executable
+            script_path = os.path.abspath(sys.argv[0])
+            cmd = f'schtasks /Create /TN "ChroLensSorting_{time_str.replace(":","")}" /SC DAILY /TR "{exe_path} {script_path}" /ST {time_str} /F'
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         if result.returncode != 0:
             self.log(f"建立排程失敗：{result.stderr.strip()}")
@@ -604,6 +616,8 @@ class AutoMoveApp:
             self.log(f"刪除排程失敗：{result.stderr.strip()}")
 
 if __name__ == "__main__":
+    # 自動切換到程式所在目錄，確保能正確讀取 settings.json
+    os.chdir(os.path.dirname(os.path.abspath(sys.argv[0])))
     root = tb.Window(themename="darkly")
     app = AutoMoveApp(root)
     root.mainloop()

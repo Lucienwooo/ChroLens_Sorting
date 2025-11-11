@@ -2,14 +2,28 @@
 #此工具為內部開發測試用，僅供參考，不保證其結果的準確性或適用性。**使用本工具所產生的一切後果，使用者需自行承擔。**開發者與公司對因使用此工具而造成的任何直接、間接或附帶損害，均不承擔任何責任。使用本工具即表示您已閱讀、理解並同意此免責聲明的所有條款。
 #日本語：
 #このツールは、社内での開発テスト用であり、あくまで参考として提供されるものです。その結果の正確性や適用性について、いかなる保証も行いません。本ツールの使用により生じるいかなる結果も、利用者自身の責任となります。開発者および会社は、本ツールの使用に起因する直接的、間接的、または付随的な損害について、一切の責任を負いません。本ツールを使用することにより、本免責事項のすべての条項を読み、理解し、同意したものとみなされます。
-# row 0: 上方操作列（列出清單、移動、下拉選單、延遲/自動移動/自動關閉）
-# row 1: 副檔名欄位 1~5
-# row 2: 副檔名欄位 6~10
-# row 3: 目的資料夾欄位（依副檔名數量動態產生）
-# row 4: 來源資料夾選擇（含取出位置、存檔按鈕）
-# row 5: 日誌視窗
-# row 6: 進度條
-#pyinstaller --noconsole --onefile --icon=umi_綠色.ico --add-data "umi_綠色.ico;." ChroLens_Sorting1.1.py
+
+# ============================================================================
+# ChroLens_Sorting - 自動檔案整理工具
+# ============================================================================
+# 功能說明：
+#   - 根據副檔名或關鍵字自動分類並移動檔案
+#   - 支援自動執行與定時排程
+#   - 可儲存設定以便重複使用
+# 
+# UI 架構：
+#   row 0: 上方操作列（列出清單、移動、版本、下拉選單、延遲/自動移動/自動關閉）
+#   row 0+: 全部移動欄位（0. 全部）
+#   row 1: 副檔名欄位 1~5（動態產生）
+#   row 2: 副檔名欄位 6~10（動態產生）
+#   row 3: 目的資料夾欄位（依副檔名數量動態產生）
+#   row 4: 來源資料夾選擇（含取出位置、存檔、工作排程按鈕）
+#   row 5: 日誌視窗
+#
+# PyInstaller 打包指令：
+#   pyinstaller --noconsole --onefile --icon=umi_綠色.ico --add-data "umi_綠色.ico;." ChroLens_Sorting1.1.py
+# ============================================================================
+
 import os
 import shutil
 import ttkbootstrap as tb
@@ -23,13 +37,27 @@ import requests
 import zipfile
 import io
 
-SETTINGS_FILE = "settings.json"
-GITHUB_REPO = "Lucienwooo/ChroLens_Sorting"  # 請替換成你的GitHub repo
-
+# ============================================================================
+# 全域設定
+# ============================================================================
+SETTINGS_FILE = "settings.json"  # 設定檔名稱
+GITHUB_REPO = "Lucienwooo/ChroLens_Sorting"  # GitHub 倉庫
 CURRENT_VERSION = "1.1"  # 目前版本號
 
+# ============================================================================
+# 主程式類別
+# ============================================================================
 class AutoMoveApp:
+    """
+    ChroLens_Sorting 主程式類別
+    
+    功能：
+        - 自動整理檔案到指定資料夾
+        - 支援多種副檔名和關鍵字篩選
+        - 提供定時執行和自動關閉功能
+    """
     def __init__(self, root):
+        """初始化應用程式"""
         self.tip = None
         self.root = root
         self.root.title("ChroLens_Sorting1.1")
@@ -117,10 +145,6 @@ class AutoMoveApp:
         self.log_display.pack(pady=10, padx=10, fill='x')  # ← 讓日誌框更靠近主程式邊框
         self.log_display.config(xscrollcommand=lambda *args: None)
 
-        # row 6: 進度條（移除進度條相關程式碼）
-        # self.progress = tb.Progressbar(self.root, orient='horizontal', mode='determinate', length=660)
-        # self.progress.pack(pady=(0, 10))
-
         self.update_dynamic_fields()
         # 強化讀取條件：只有在沒有 settings.json 時才預設下載資料夾
         if not os.path.exists(SETTINGS_FILE):
@@ -133,19 +157,23 @@ class AutoMoveApp:
             delay = 0
         if delay > 0:
             self.countdown("自動移動", delay, self.move_files)
-        # 首次開啟時自動列出清單，並刷新所有欄位帶入目前取出路徑內容
-        # self.list_files()
 
     def update_dynamic_fields(self, event=None):
+        """動態更新副檔名與目的資料夾欄位數量"""
+        # 清空現有欄位
         for widget in self.dest_frame.winfo_children():
             widget.destroy()
         self.extension_entries.clear()
         self.dest_entries.clear()
+        
+        # 取得欄位數量
         try:
             count = int(self.kind_var.get())
         except ValueError:
             count = 10
-        count = min(max(count, 1), 20)
+        count = min(max(count, 1), 20)  # 限制在 1-20 之間
+        
+        # 初始化拖曳資料
         self._drag_data = {"widget": None, "index": None, "type": None, "tip": None}
         for i in range(count):
             row_dest = tb.Frame(self.dest_frame)
@@ -175,7 +203,10 @@ class AutoMoveApp:
         self.root.geometry("")
 
     def select_source_folder(self):
-        folder = filedialog.askdirectory(initialdir=self.source_entry.get())
+        initial_dir = self.source_entry.get().strip()
+        if not initial_dir or not os.path.isdir(initial_dir):
+            initial_dir = os.path.expanduser("~")
+        folder = filedialog.askdirectory(initialdir=initial_dir)
         if folder:
             self.source_entry.delete(0, 'end')
             self.source_entry.insert(0, folder)
@@ -183,7 +214,12 @@ class AutoMoveApp:
             self.save_settings()
 
     def select_dest_folder(self, entry):
-        folder = filedialog.askdirectory(initialdir=entry.get())
+        initial_dir = entry.get().strip()
+        if not initial_dir or not os.path.isdir(initial_dir):
+            initial_dir = self.source_entry.get().strip()
+            if not initial_dir or not os.path.isdir(initial_dir):
+                initial_dir = os.path.expanduser("~")
+        folder = filedialog.askdirectory(initialdir=initial_dir)
         if folder:
             entry.delete(0, 'end')
             entry.insert(0, folder)
@@ -191,7 +227,7 @@ class AutoMoveApp:
             self.save_settings()
 
     def list_files(self):
-        path = self.source_entry.get()
+        path = self.source_entry.get().strip()
         # 每次列出清單時刷新所有欄位並帶入目前取出路徑
         self.kind_var.set("3")
         self.update_dynamic_fields()
@@ -203,36 +239,58 @@ class AutoMoveApp:
         for entry in self.dest_entries:
             entry.insert(0, path)
         extensions = [e.get().strip() for e in self.extension_entries]
-        if not os.path.isdir(path):
-            self.log("來源路徑無效")
+        if not path or not os.path.isdir(path):
+            self.log("錯誤：來源路徑無效或不存在")
+            messagebox.showwarning("警告", "請先選擇有效的來源資料夾")
             return
         if all(not ext for ext in extensions):
-            all_files = [f for f in os.listdir(path)]
+            try:
+                all_files = os.listdir(path)
+            except PermissionError:
+                self.log(f"錯誤：無權限讀取 {path}")
+                messagebox.showerror("權限不足", f"無法讀取資料夾：{path}")
+                return
+            except Exception as e:
+                self.log(f"錯誤：無法讀取 {path}（{e}）")
+                return
+                
             ext_count = {}
             folder_count = 0
             for f in all_files:
                 full = os.path.join(path, f)
-                if os.path.isdir(full):
-                    folder_count += 1
-                else:
-                    _, ext = os.path.splitext(f)
-                    if ext:
-                        ext_count[ext] = ext_count.get(ext, 0) + 1
+                try:
+                    if os.path.isdir(full):
+                        folder_count += 1
                     else:
-                        ext_count["(無副檔名)"] = ext_count.get("(無副檔名)", 0) + 1
+                        _, ext = os.path.splitext(f)
+                        if ext:
+                            ext_count[ext] = ext_count.get(ext, 0) + 1
+                        else:
+                            ext_count["(無副檔名)"] = ext_count.get("(無副檔名)", 0) + 1
+                except Exception as e:
+                    self.log(f"警告：無法處理檔案 {f}（{e}）")
+                    continue
             if not all_files:
                 self.log(f"{path} 中沒有找到任何檔案或資料夾")
                 return
             self.log(f"在 {path} 找到以下檔案與資料夾：")
             total_size = 0
-            for idx, f in enumerate(all_files, 1):
+            # 限制顯示數量以避免 UI 卡頓
+            display_limit = 500
+            for idx, f in enumerate(all_files[:display_limit], 1):
                 full = os.path.join(path, f)
-                if os.path.isdir(full):
-                    self.log(f"{idx}－[資料夾]－{f}")
-                else:
-                    size = os.path.getsize(full)
-                    total_size += size
-                    self.log(f"{idx}－{self.format_size(size)}－{f}")
+                try:
+                    if os.path.isdir(full):
+                        self.log(f"{idx}－[資料夾]－{f}")
+                    else:
+                        size = os.path.getsize(full)
+                        total_size += size
+                        self.log(f"{idx}－{self.format_size(size)}－{f}")
+                except Exception as e:
+                    self.log(f"{idx}－[無法讀取]－{f}")
+                    continue
+            if len(all_files) > display_limit:
+                self.log(f"... 還有 {len(all_files) - display_limit} 個項目未顯示")
             self.log(f"共找到 {len(all_files)} 個項目，總容量 {self.format_size(total_size)}（不含資料夾）")
             for ext, count in sorted(ext_count.items()):
                 self.log(f"{ext}={count}個檔案")
@@ -253,48 +311,84 @@ class AutoMoveApp:
                 entry.delete(0, "end")
                 entry.insert(0, ext)
         else:
+            try:
+                all_files_in_path = os.listdir(path)
+            except PermissionError:
+                self.log(f"錯誤：無權限讀取 {path}")
+                messagebox.showerror("權限不足", f"無法讀取資料夾：{path}")
+                return
+            except Exception as e:
+                self.log(f"錯誤：無法讀取 {path}（{e}）")
+                return
+                
             all_files = []
             ext_count = {ext: 0 for ext in extensions if ext}
             for ext in extensions:
                 if not ext:
                     continue
                 if ext == "[資料夾]":
-                    files = [f for f in os.listdir(path) if os.path.isdir(os.path.join(path, f))]
+                    files = [f for f in all_files_in_path if os.path.isdir(os.path.join(path, f))]
                 else:
-                    files = [f for f in os.listdir(path) if f.endswith(ext)]
-                all_files += files
+                    files = [f for f in all_files_in_path if f.endswith(ext)]
+                all_files.extend(files)
                 ext_count[ext] += len(files)
             if not all_files:
                 self.log(f"{path} 中沒有找到符合條件的檔案或資料夾")
                 return
             self.log(f"在 {path} 找到以下檔案與資料夾：")
             total_size = 0
-            for idx, f in enumerate(all_files, 1):
+            # 限制顯示數量以避免 UI 卡頓
+            display_limit = 500
+            for idx, f in enumerate(all_files[:display_limit], 1):
                 full = os.path.join(path, f)
-                if os.path.isdir(full):
-                    self.log(f"{idx}－[資料夾]－{f}")
-                else:
-                    size = os.path.getsize(full)
-                    total_size += size
-                    self.log(f"{idx}－{self.format_size(size)}－{f}")
+                try:
+                    if os.path.isdir(full):
+                        self.log(f"{idx}－[資料夾]－{f}")
+                    else:
+                        size = os.path.getsize(full)
+                        total_size += size
+                        self.log(f"{idx}－{self.format_size(size)}－{f}")
+                except Exception as e:
+                    self.log(f"{idx}－[無法讀取]－{f}")
+                    continue
+            if len(all_files) > display_limit:
+                self.log(f"... 還有 {len(all_files) - display_limit} 個項目未顯示")
             self.log(f"共找到 {len(all_files)} 個項目，總容量 {self.format_size(total_size)}（不含資料夾）")
             for ext, count in ext_count.items():
                 self.log(f"{ext}={count}個檔案")
 
     def move_files(self):
-        src = self.source_entry.get()
+        src = self.source_entry.get().strip()
+        if not src or not os.path.isdir(src):
+            self.log("錯誤：來源路徑無效或不存在")
+            messagebox.showerror("錯誤", "請先選擇有效的來源資料夾")
+            return
+        
         extensions = [e.get().strip() for e in self.extension_entries]
         destinations = [e.get().strip() for e in self.dest_entries]
-        all_files = os.listdir(src)
+        
+        try:
+            all_files = os.listdir(src)
+        except PermissionError:
+            self.log(f"錯誤：無權限讀取來源路徑 {src}")
+            messagebox.showerror("權限不足", f"無法讀取資料夾：{src}")
+            return
+        except Exception as e:
+            self.log(f"錯誤：無法讀取來源路徑 {src}（{e}）")
+            messagebox.showerror("錯誤", f"無法讀取資料夾：{e}")
+            return
+            
         moved_files = set()
         ext_dst_pairs = [(ext, dst) for ext, dst in zip(extensions, destinations) if ext and dst]
         idx = 1
         moved = failed = 0
-        total = len(all_files)
-        # self.progress["maximum"] = total  # 進度條已移除
 
         # 先依照副檔名/關鍵字欄位順序移動
         for ext, dst in ext_dst_pairs:
+            if not os.path.isdir(dst):
+                self.log(f"警告：目的路徑 {dst} 不存在，已跳過")
+                continue
+                
             if ext == "[資料夾]":
                 files = [f for f in all_files if f not in moved_files and os.path.isdir(os.path.join(src, f))]
             elif ext.startswith("."):
@@ -302,35 +396,56 @@ class AutoMoveApp:
             else:
                 # 關鍵字搜尋時，檔案與資料夾都要比對名稱（不分大小寫）
                 files = [f for f in all_files if f not in moved_files and ext.lower() in f.lower()]
+            
             for f in files:
+                src_path = os.path.join(src, f)
+                dst_path = os.path.join(dst, f)
                 try:
-                    shutil.move(os.path.join(src, f), os.path.join(dst, f))
-                    self.log(f"{idx}－成功移動：{f}")
-                    moved += 1
-                    moved_files.add(f)
+                    # 檢查目標是否已存在
+                    if os.path.exists(dst_path):
+                        self.log(f"{idx}－移動失敗：{f}（目標位置已有同名檔案）")
+                        failed += 1
+                    else:
+                        shutil.move(src_path, dst_path)
+                        self.log(f"{idx}－成功移動：{f}")
+                        moved += 1
+                        moved_files.add(f)
+                except PermissionError:
+                    self.log(f"{idx}－移動失敗：{f}（權限不足）")
+                    failed += 1
                 except Exception as e:
                     self.log(f"{idx}－移動失敗：{f}（錯誤：{e}）")
                     failed += 1
                 idx += 1
-                # self.progress["value"] = idx  # 進度條已移除
                 self.root.update_idletasks()
 
         # 最後處理 0.欄位（全部），只有在有勾選時才執行
         if self.all_var.get():
             all_path = self.entry_all_path.get().strip()
             if all_path:
-                remain_files = [f for f in all_files if f not in moved_files]
-                for f in remain_files:
-                    try:
-                        shutil.move(os.path.join(src, f), os.path.join(all_path, f))
-                        self.log(f"{idx}－ALL移動：{f}")
-                        moved += 1
-                    except Exception as e:
-                        self.log(f"{idx}－ALL移動失敗：{f}（錯誤：{e}）")
-                        failed += 1
-                    idx += 1
-                    # self.progress["value"] = idx  # 進度條已移除
-                    self.root.update_idletasks()
+                if not os.path.isdir(all_path):
+                    self.log(f"警告：全部移動目的路徑 {all_path} 不存在")
+                else:
+                    remain_files = [f for f in all_files if f not in moved_files]
+                    for f in remain_files:
+                        src_path = os.path.join(src, f)
+                        dst_path = os.path.join(all_path, f)
+                        try:
+                            if os.path.exists(dst_path):
+                                self.log(f"{idx}－ALL移動失敗：{f}（目標位置已有同名檔案）")
+                                failed += 1
+                            else:
+                                shutil.move(src_path, dst_path)
+                                self.log(f"{idx}－ALL移動：{f}")
+                                moved += 1
+                        except PermissionError:
+                            self.log(f"{idx}－ALL移動失敗：{f}（權限不足）")
+                            failed += 1
+                        except Exception as e:
+                            self.log(f"{idx}－ALL移動失敗：{f}（錯誤：{e}）")
+                            failed += 1
+                        idx += 1
+                        self.root.update_idletasks()
         self.log(f"移動完成：{moved} 成功，{failed} 失敗")
 
         # 只處理自動關閉
@@ -345,7 +460,14 @@ class AutoMoveApp:
             self.countdown("自動關閉", sec, self.root.destroy)
 
     def countdown(self, mode, seconds, callback):
-        # mode: "自動移動" or "自動關閉"
+        """
+        倒數計時器
+        
+        Args:
+            mode: 模式名稱（"自動移動" 或 "自動關閉"）
+            seconds: 倒數秒數
+            callback: 倒數結束後執行的函數
+        """
         if seconds <= 0:
             self.log(f"{mode}開始執行")
             callback()
@@ -353,12 +475,10 @@ class AutoMoveApp:
         self.log(f"{mode}倒數：{seconds} 秒")
         self.root.after(1000, lambda: self.countdown(mode, seconds - 1, callback))
 
-    def move_files_once(self):
-        # 執行一次移動，不再觸發自動移動
-        self.move_delay_var.set("0")
-        self.move_files()
+
 
     def show_tip(self, text):
+        """顯示提示工具提示"""
         if self.tip is not None:
             return
         x = self.root.winfo_pointerx()
@@ -370,11 +490,21 @@ class AutoMoveApp:
         label.pack(ipadx=5, ipady=2)
 
     def hide_tip(self):
+        """隱藏提示工具提示"""
         if self.tip:
             self.tip.destroy()
             self.tip = None
 
     def format_size(self, size):
+        """
+        格式化檔案大小顯示
+        
+        Args:
+            size: 檔案大小（bytes）
+            
+        Returns:
+            格式化後的字串（KB/MB/GB）
+        """
         if size < 1024 * 1024:
             return f"{round(size / 1024)}KB"
         elif size < 1024 * 1024 * 1024:
@@ -384,8 +514,10 @@ class AutoMoveApp:
 
     def log(self, message):
         self.log_display.insert('end', message + '\n')
-        if int(self.log_display.index('end-1c').split('.')[0]) > 1000:
-            self.log_display.delete("1.0", "2.0")
+        # 限制日誌行數，避免記憶體過度使用
+        line_count = int(self.log_display.index('end-1c').split('.')[0])
+        if line_count > 2000:
+            self.log_display.delete("1.0", f"{line_count - 1000}.0")
         self.log_display.see('end')
 
     def load_settings(self):
@@ -395,20 +527,35 @@ class AutoMoveApp:
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            self.kind_var.set(data.get("kind_var", "10"))
+            # 驗證並載入設定
+            kind_val = data.get("kind_var", "10")
+            try:
+                kind_num = int(kind_val)
+                if 1 <= kind_num <= 20:
+                    self.kind_var.set(kind_val)
+            except ValueError:
+                pass
+                
             self.move_delay_var.set(data.get("move_delay_var", "0"))
             self.auto_close_var.set(data.get("auto_close_var", "0"))
             self.update_dynamic_fields()
+            
             for entry, val in zip(self.extension_entries, data.get("extensions", [])):
                 entry.delete(0, "end")
-                entry.insert(0, val)
+                if val:  # 只插入非空值
+                    entry.insert(0, val)
             for entry, val in zip(self.dest_entries, data.get("destinations", [])):
                 entry.delete(0, "end")
-                entry.insert(0, val)
+                if val:  # 只插入非空值
+                    entry.insert(0, val)
             if "source" in data and data["source"]:
                 self.source_entry.delete(0, "end")
                 self.source_entry.insert(0, data["source"])
             self._settings_loaded = True
+            self.log("設定檔載入成功")
+        except json.JSONDecodeError:
+            self.log("警告：設定檔格式錯誤，使用預設值")
+            self._settings_loaded = False
         except Exception as e:
             self.log(f"設定檔載入失敗：{e}")
             self._settings_loaded = False
@@ -425,10 +572,16 @@ class AutoMoveApp:
             }
             with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            self.log("設定已儲存")
+        except PermissionError:
+            self.log("錯誤：無權限寫入設定檔")
+            messagebox.showerror("權限不足", "無法儲存設定檔，請確認程式有寫入權限")
         except Exception as e:
             self.log(f"設定檔儲存失敗：{e}")
+            messagebox.showerror("儲存失敗", f"無法儲存設定：{e}")
 
     def start_drag(self, event, idx, typ):
+        """開始拖曳欄位內容"""
         self._drag_data["widget"] = event.widget
         self._drag_data["index"] = idx
         self._drag_data["type"] = typ
@@ -441,21 +594,25 @@ class AutoMoveApp:
             label.pack(ipadx=5, ipady=2)
 
     def do_drag(self, event):
+        """拖曳中更新提示位置"""
         tip = self._drag_data.get("tip")
         if tip:
             tip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
 
     def stop_drag(self, event):
+        """停止拖曳並交換欄位內容"""
         if self._drag_data["widget"] is None:
             return
         x, y = event.x_root, event.y_root
         entries = self.extension_entries if self._drag_data["type"] == "ext" else self.dest_entries
         target_idx = None
+        # 尋找放置目標
         for idx, entry in enumerate(entries):
             ex, ey, ew, eh = entry.winfo_rootx(), entry.winfo_rooty(), entry.winfo_width(), entry.winfo_height()
             if ex <= x <= ex+ew and ey <= y <= ey+eh:
                 target_idx = idx
                 break
+        # 交換內容
         if target_idx is not None and target_idx != self._drag_data["index"]:
             src_entry = entries[self._drag_data["index"]]
             dst_entry = entries[target_idx]
@@ -465,15 +622,20 @@ class AutoMoveApp:
             src_entry.insert(0, dst_val)
             dst_entry.delete(0, "end")
             dst_entry.insert(0, src_val)
+        # 清理
         if self._drag_data.get("tip"):
             self._drag_data["tip"].destroy()
         self._drag_data = {"widget": None, "index": None, "type": None, "tip": None}
 
     def validate_move_delay(self, event=None):
+        val = self.move_delay_var.get().strip()
         try:
-            move_delay = int(self.move_delay_var.get())
+            move_delay = int(val)
         except ValueError:
+            if val:  # 只有在有輸入時才警告
+                self.log("警告：自動移動秒數必須為數字")
             move_delay = 0
+            self.move_delay_var.set("0")
         try:
             auto_close = int(self.auto_close_var.get())
         except ValueError:
@@ -482,6 +644,7 @@ class AutoMoveApp:
         if move_delay < 0:
             move_delay = 0
             self.move_delay_var.set("0")
+            self.log("自動移動秒數已修正為 0")
         if auto_close > 0 and move_delay > auto_close:
             self.move_delay_var.set(str(auto_close))
             self.log("自動移動秒數已自動修正為不高於自動關閉秒數")
@@ -491,27 +654,34 @@ class AutoMoveApp:
             move_delay = int(self.move_delay_var.get())
         except ValueError:
             move_delay = 0
-        val = self.auto_close_var.get()
+        val = self.auto_close_var.get().strip()
         try:
             num = int(val)
         except ValueError:
+            if val:  # 只有在有輸入時才警告
+                self.log("警告：自動關閉秒數必須為數字")
             num = 0
+            self.auto_close_var.set("0")
+            return
         if 0 < num < 5:
             num = 5
             self.auto_close_var.set("5")
+            self.log("自動關閉秒數最少為 5 秒，已自動修正")
         elif num < 0:
             num = 0
             self.auto_close_var.set("0")
+            self.log("自動關閉秒數已修正為 0")
         # 自動關閉不能小於自動移動
         if num > 0 and num < move_delay:
             self.auto_close_var.set(str(move_delay))
             self.log("自動關閉秒數已自動修正為不低於自動移動秒數")
 
     def open_schedule_window(self):
+        """開啟工作排程設定視窗"""
         SCHEDULE_FILE = "schedule_times.json"
         win = tb.Toplevel(self.root)
         win.title("定時執行設定")
-        win.geometry("400x520")  # ← 視窗高度調整為 520
+        win.geometry("400x520")
         win.resizable(False, False)
         win.grab_set()
         # 設定 icon，支援 PyInstaller 打包後與原始執行
@@ -603,40 +773,54 @@ class AutoMoveApp:
                   command=lambda: os.system("control schedtasks")).pack()
 
     def create_windows_task(self, time_str):
-        import sys
         import subprocess
-        if getattr(sys, 'frozen', False):
-            # 如果是打包後的 exe
-            exe_path = sys.executable
-            cmd = f'schtasks /Create /TN "ChroLensSorting_{time_str.replace(":","")}" /SC DAILY /TR "{exe_path}" /ST {time_str} /F'
-        else:
-            # 如果是原始 py
-            exe_path = sys.executable
-            script_path = os.path.abspath(sys.argv[0])
-            cmd = f'schtasks /Create /TN "ChroLensSorting_{time_str.replace(":","")}" /SC DAILY /TR "{exe_path} {script_path}" /ST {time_str} /F'
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        if result.returncode != 0:
-            self.log(f"建立排程失敗：{result.stderr.strip()}")
+        try:
+            task_name = f"ChroLensSorting_{time_str.replace(':', '')}"
+            if getattr(sys, 'frozen', False):
+                # 如果是打包後的 exe
+                exe_path = sys.executable
+                cmd = f'schtasks /Create /TN "{task_name}" /SC DAILY /TR "\"{exe_path}\"" /ST {time_str} /F'
+            else:
+                # 如果是原始 py
+                exe_path = sys.executable
+                script_path = os.path.abspath(sys.argv[0])
+                cmd = f'schtasks /Create /TN "{task_name}" /SC DAILY /TR "\"{exe_path}\" \"{script_path}\"" /ST {time_str} /F'
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='cp950')
+            if result.returncode == 0:
+                self.log(f"成功建立排程：{task_name} ({time_str})")
+            else:
+                error_msg = result.stderr.strip() or result.stdout.strip()
+                self.log(f"建立排程失敗：{error_msg}")
+                messagebox.showwarning("排程建立失敗", f"無法建立工作排程：{error_msg}")
+        except Exception as e:
+            self.log(f"建立排程時發生錯誤：{e}")
+            messagebox.showerror("錯誤", f"建立工作排程時發生錯誤：{e}")
 
     def delete_windows_task(self, time_str):
         import subprocess
-        task_name = f"ChroLensSorting_{time_str.replace(':','')}"
-        cmd = f'schtasks /Delete /TN "{task_name}" /F'
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        if result.returncode != 0:
-            self.log(f"刪除排程失敗：{result.stderr.strip()}")
+        try:
+            task_name = f"ChroLensSorting_{time_str.replace(':','')}"
+            cmd = f'schtasks /Delete /TN "{task_name}" /F'
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, encoding='cp950')
+            if result.returncode == 0:
+                self.log(f"成功刪除排程：{task_name}")
+            else:
+                error_msg = result.stderr.strip() or result.stdout.strip()
+                self.log(f"刪除排程失敗：{error_msg}")
+        except Exception as e:
+            self.log(f"刪除排程時發生錯誤：{e}")
 
     def check_for_updates(self):
         try:
             url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
             response = requests.get(url, timeout=10)
             response.raise_for_status()
-            latest_version = response.json().get("tag_name", "")
+            data = response.json()
+            latest_version = data.get("tag_name", "")
             # 去除 tag 前的 'v' 或 'V'
             latest_version_clean = latest_version.lstrip('vV')
-            assets = response.json().get("assets", [])
+            assets = data.get("assets", [])
             zip_url = None
-            exe_name = None
             for asset in assets:
                 if asset["name"].endswith(".zip"):
                     zip_url = asset["browser_download_url"]
@@ -644,29 +828,66 @@ class AutoMoveApp:
             if not latest_version_clean or not zip_url:
                 messagebox.showerror("版本檢查失敗", "無法取得最新版本資訊或下載連結。")
                 return
-            # 強化：如果最新版本與目前版本相同，不更新
-            if latest_version_clean == CURRENT_VERSION:
-                messagebox.showinfo("版本檢查", "目前程式版本為最新版本。")
+            # 使用版本比較而非字串比較
+            if self._compare_versions(latest_version_clean, CURRENT_VERSION) <= 0:
+                messagebox.showinfo("版本檢查", f"目前程式版本為最新版本 ({CURRENT_VERSION})。")
                 return
-            if messagebox.askyesno("有新版本", f"發現新版本 {latest_version_clean}，是否要自動更新？"):
+            if messagebox.askyesno("有新版本", f"發現新版本 {latest_version_clean}（目前版本 {CURRENT_VERSION}），是否要自動更新？"):
                 self.download_and_update(zip_url)
+        except requests.exceptions.RequestException as e:
+            messagebox.showerror("網路連線失敗", f"無法連線至 GitHub 伺服器：{e}")
         except Exception as e:
             messagebox.showerror("版本檢查失敗", f"檢查更新時發生錯誤：{e}")
+
+    def _compare_versions(self, v1, v2):
+        """比較版本號，v1 > v2 返回 1，v1 < v2 返回 -1，相等返回 0"""
+        try:
+            parts1 = [int(x) for x in v1.split('.')]
+            parts2 = [int(x) for x in v2.split('.')]
+            # 補齊長度
+            max_len = max(len(parts1), len(parts2))
+            parts1 += [0] * (max_len - len(parts1))
+            parts2 += [0] * (max_len - len(parts2))
+            for p1, p2 in zip(parts1, parts2):
+                if p1 > p2:
+                    return 1
+                elif p1 < p2:
+                    return -1
+            return 0
+        except (ValueError, AttributeError):
+            # 若版本格式不正確，回退到字串比較
+            if v1 > v2:
+                return 1
+            elif v1 < v2:
+                return -1
+            return 0
 
     def download_and_update(self, zip_url):
         try:
             self.log("正在下載新版程式...")
-            r = requests.get(zip_url, timeout=30)
+            r = requests.get(zip_url, timeout=30, stream=True)
             r.raise_for_status()
-            z = zipfile.ZipFile(io.BytesIO(r.content))
+            
+            # 讀取下載內容
+            content = io.BytesIO()
+            for chunk in r.iter_content(chunk_size=8192):
+                content.write(chunk)
+            content.seek(0)
+            
+            z = zipfile.ZipFile(content)
             updated = False
             # 下載新版 exe，另存為新檔名
             for name in z.namelist():
                 if name.lower().endswith(".exe"):
                     new_exe = os.path.basename(name)
+                    # 避免覆蓋當前執行檔
+                    if os.path.exists(new_exe):
+                        base, ext = os.path.splitext(new_exe)
+                        new_exe = f"{base}_new{ext}"
                     with open(new_exe, "wb") as f:
                         f.write(z.read(name))
                     updated = True
+                    self.log(f"成功下載新版程式：{new_exe}")
                     break
             if updated:
                 messagebox.showinfo(
@@ -675,14 +896,25 @@ class AutoMoveApp:
                 )
             else:
                 messagebox.showerror("更新失敗", "更新包中未找到 .exe 檔案，請確認 zip 內有可執行檔。")
+        except requests.exceptions.RequestException as e:
+            self.log(f"下載失敗：網路連線錯誤 - {e}")
+            messagebox.showerror("下載失敗", f"無法下載更新檔案：{e}")
+        except zipfile.BadZipFile:
+            self.log("下載失敗：檔案格式錯誤")
+            messagebox.showerror("更新失敗", "下載的檔案不是有效的 ZIP 格式。")
         except Exception as e:
+            self.log(f"更新失敗：{e}")
             messagebox.showerror("更新失敗", f"自動更新過程中發生錯誤：{e}")
 
+# ============================================================================
+# 程式進入點
+# ============================================================================
 if __name__ == "__main__":
     # 強制切換到程式所在目錄，確保能正確讀取 settings.json
-    import sys, os
     exe_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
     os.chdir(exe_dir)
+    
+    # 建立主視窗
     root = tb.Window(themename="darkly")
     app = AutoMoveApp(root)
     root.mainloop()

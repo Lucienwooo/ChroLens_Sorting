@@ -33,9 +33,9 @@ import tkinter as tk
 import json
 import datetime
 import sys
-import requests
-import zipfile
-import io
+import threading
+from update_manager import UpdateManager
+from update_dialog import UpdateDialog, NoUpdateDialog
 
 # ============================================================================
 # 全域設定
@@ -60,7 +60,7 @@ class AutoMoveApp:
         """初始化應用程式"""
         self.tip = None
         self.root = root
-        self.root.title("ChroLens_Sorting1.1")
+        self.root.title(f"ChroLens_Sorting {CURRENT_VERSION}")
         # 設定 icon，支援 PyInstaller 打包後與原始執行
         try:
             if hasattr(sys, "_MEIPASS"):
@@ -811,100 +811,20 @@ class AutoMoveApp:
             self.log(f"刪除排程時發生錯誤：{e}")
 
     def check_for_updates(self):
-        try:
-            url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
-            response = requests.get(url, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-            latest_version = data.get("tag_name", "")
-            # 去除 tag 前的 'v' 或 'V'
-            latest_version_clean = latest_version.lstrip('vV')
-            assets = data.get("assets", [])
-            zip_url = None
-            for asset in assets:
-                if asset["name"].endswith(".zip"):
-                    zip_url = asset["browser_download_url"]
-                    break
-            if not latest_version_clean or not zip_url:
-                messagebox.showerror("版本檢查失敗", "無法取得最新版本資訊或下載連結。")
-                return
-            # 使用版本比較而非字串比較
-            if self._compare_versions(latest_version_clean, CURRENT_VERSION) <= 0:
-                messagebox.showinfo("版本檢查", f"目前程式版本為最新版本 ({CURRENT_VERSION})。")
-                return
-            if messagebox.askyesno("有新版本", f"發現新版本 {latest_version_clean}（目前版本 {CURRENT_VERSION}），是否要自動更新？"):
-                self.download_and_update(zip_url)
-        except requests.exceptions.RequestException as e:
-            messagebox.showerror("網路連線失敗", f"無法連線至 GitHub 伺服器：{e}")
-        except Exception as e:
-            messagebox.showerror("版本檢查失敗", f"檢查更新時發生錯誤：{e}")
-
-    def _compare_versions(self, v1, v2):
-        """比較版本號，v1 > v2 返回 1，v1 < v2 返回 -1，相等返回 0"""
-        try:
-            parts1 = [int(x) for x in v1.split('.')]
-            parts2 = [int(x) for x in v2.split('.')]
-            # 補齊長度
-            max_len = max(len(parts1), len(parts2))
-            parts1 += [0] * (max_len - len(parts1))
-            parts2 += [0] * (max_len - len(parts2))
-            for p1, p2 in zip(parts1, parts2):
-                if p1 > p2:
-                    return 1
-                elif p1 < p2:
-                    return -1
-            return 0
-        except (ValueError, AttributeError):
-            # 若版本格式不正確，回退到字串比較
-            if v1 > v2:
-                return 1
-            elif v1 < v2:
-                return -1
-            return 0
-
-    def download_and_update(self, zip_url):
-        try:
-            self.log("正在下載新版程式...")
-            r = requests.get(zip_url, timeout=30, stream=True)
-            r.raise_for_status()
-            
-            # 讀取下載內容
-            content = io.BytesIO()
-            for chunk in r.iter_content(chunk_size=8192):
-                content.write(chunk)
-            content.seek(0)
-            
-            z = zipfile.ZipFile(content)
-            updated = False
-            # 下載新版 exe，另存為新檔名
-            for name in z.namelist():
-                if name.lower().endswith(".exe"):
-                    new_exe = os.path.basename(name)
-                    # 避免覆蓋當前執行檔
-                    if os.path.exists(new_exe):
-                        base, ext = os.path.splitext(new_exe)
-                        new_exe = f"{base}_new{ext}"
-                    with open(new_exe, "wb") as f:
-                        f.write(z.read(name))
-                    updated = True
-                    self.log(f"成功下載新版程式：{new_exe}")
-                    break
-            if updated:
-                messagebox.showinfo(
-                    "更新成功",
-                    f"已下載新版程式（{new_exe}），請關閉本程式後執行新檔案完成更新。"
-                )
-            else:
-                messagebox.showerror("更新失敗", "更新包中未找到 .exe 檔案，請確認 zip 內有可執行檔。")
-        except requests.exceptions.RequestException as e:
-            self.log(f"下載失敗：網路連線錯誤 - {e}")
-            messagebox.showerror("下載失敗", f"無法下載更新檔案：{e}")
-        except zipfile.BadZipFile:
-            self.log("下載失敗：檔案格式錯誤")
-            messagebox.showerror("更新失敗", "下載的檔案不是有效的 ZIP 格式。")
-        except Exception as e:
-            self.log(f"更新失敗：{e}")
-            messagebox.showerror("更新失敗", f"自動更新過程中發生錯誤：{e}")
+        """檢查更新 - 使用新的更新管理器"""
+        def update_check_thread():
+            try:
+                updater = UpdateManager(CURRENT_VERSION)
+                update_info = updater.check_for_updates()
+                
+                if update_info:
+                    self.root.after(0, lambda: UpdateDialog(self.root, updater, update_info))
+                else:
+                    self.root.after(0, lambda: NoUpdateDialog(self.root, CURRENT_VERSION))
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("錯誤", f"檢查更新失敗：{str(e)}"))
+        
+        threading.Thread(target=update_check_thread, daemon=True).start()
 
 # ============================================================================
 # 程式進入點

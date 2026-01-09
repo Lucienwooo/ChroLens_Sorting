@@ -25,7 +25,7 @@ try:
 except ImportError:
     NOTIFY_AVAILABLE = False
 
-from update_manager import UpdateManager
+from version_manager import VersionManager
 from update_dialog import UpdateDialog, NoUpdateDialog
 
 # ============================================================================
@@ -38,33 +38,7 @@ SCHEDULE_FILE = "schedule_times.json"
 GITHUB_REPO = "Lucienwooo/ChroLens_Sorting"
 CURRENT_VERSION = "1.2"
 
-# 內建模板
-DEFAULT_TEMPLATES = {
-    "🖼️ 圖片整理": {
-        "extensions": [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"],
-        "description": "整理所有圖片檔案"
-    },
-    "📄 文件整理": {
-        "extensions": [".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".txt"],
-        "description": "整理Office文件和PDF"
-    },
-    "🎬 影片整理": {
-        "extensions": [".mp4", ".mkv", ".avi", ".mov", ".wmv", ".flv"],
-        "description": "整理影片檔案"
-    },
-    "🎵 音樂整理": {
-        "extensions": [".mp3", ".wav", ".flac", ".aac", ".ogg", ".m4a"],
-        "description": "整理音樂檔案"
-    },
-    "💾 壓縮檔整理": {
-        "extensions": [".zip", ".rar", ".7z", ".tar", ".gz"],
-        "description": "整理壓縮檔案"
-    },
-    "📦 安裝檔整理": {
-        "extensions": [".exe", ".msi", ".dmg", ".pkg"],
-        "description": "整理安裝程式"
-    }
-}
+# 模板設定（使用者完全自訂）
 
 # ============================================================================
 # 主程式類別
@@ -89,11 +63,12 @@ class AutoMoveApp:
         self.auto_close_var = tb.StringVar(value="0")
         
         # v1.2 新功能變數
-        self.recursive_var = tk.BooleanVar(value=False)  # 遞迴搜尋
-        self.preview_mode_var = tk.BooleanVar(value=False)  # 預覽模式
-        self.regex_mode_var = tk.BooleanVar(value=False)  # 正則模式
-        self.auto_subfolder_var = tk.BooleanVar(value=False)  # 自動子資料夾
+        self.auto_subfolder_var = tk.BooleanVar(value=False)  # 移動時建立當日資料夾
         self.conflict_var = tk.StringVar(value="skip")  # 衝突處理
+        
+        # 停止標記
+        self._stop_flag = False
+        self._countdown_after_id = None
         
         # 移動歷史（用於復原）
         self._move_history = []
@@ -104,6 +79,9 @@ class AutoMoveApp:
         
         # 模板
         self._templates = self._load_templates()
+        
+        # 拖曳功能
+        self._drag_data = {"widget": None, "index": None, "type": None, "tip": None}
         
         self._build_ui()
         self._settings_loaded = False
@@ -124,7 +102,7 @@ class AutoMoveApp:
         top_frame.pack(pady=5, anchor='w', padx=10, fill='x')
         
         tb.Button(top_frame, text="列出清單", command=self.list_files).pack(side=LEFT, padx=2)
-        tb.Button(top_frame, text="預覽", command=self.preview_move, bootstyle="warning").pack(side=LEFT, padx=2)
+        tb.Button(top_frame, text="停止", command=self.stop_all, bootstyle="warning").pack(side=LEFT, padx=2)
         tb.Button(top_frame, text="移動", command=self.move_files, bootstyle="success").pack(side=LEFT, padx=2)
         tb.Button(top_frame, text="復原", command=self.undo_move, bootstyle="danger").pack(side=LEFT, padx=2)
         tb.Button(top_frame, text="模板", command=self.open_template_window, bootstyle="info").pack(side=LEFT, padx=2)
@@ -141,9 +119,7 @@ class AutoMoveApp:
         opt_frame = tb.Frame(self.root)
         opt_frame.pack(pady=3, anchor='w', padx=10, fill='x')
         
-        tb.Checkbutton(opt_frame, text="遞迴搜尋", variable=self.recursive_var, bootstyle="round-toggle").pack(side=LEFT, padx=5)
-        tb.Checkbutton(opt_frame, text="正則模式", variable=self.regex_mode_var, bootstyle="round-toggle").pack(side=LEFT, padx=5)
-        tb.Checkbutton(opt_frame, text="自動子資料夾", variable=self.auto_subfolder_var, bootstyle="round-toggle").pack(side=LEFT, padx=5)
+        tb.Checkbutton(opt_frame, text="移動時建立當日資料夾", variable=self.auto_subfolder_var, bootstyle="round-toggle").pack(side=LEFT, padx=5)
         
         # 衝突處理
         tb.Label(opt_frame, text="衝突:").pack(side=LEFT, padx=(10, 2))
@@ -191,7 +167,11 @@ class AutoMoveApp:
             self.source_entry.insert(0, os.path.join(os.path.expanduser("~"), "Downloads"))
     
     def update_dynamic_fields(self, event=None):
-        """動態更新欄位"""
+        """動態更新欄位（保留現有資料）"""
+        # 先保存現有資料
+        old_exts = [e.get() for e in self.extension_entries]
+        old_dests = [e.get() for e in self.dest_entries]
+        
         for w in self.dest_frame.winfo_children():
             w.destroy()
         self.extension_entries.clear()
@@ -210,11 +190,25 @@ class AutoMoveApp:
             ext_entry = tb.Entry(row, width=15, font=self.font)
             ext_entry.pack(side=LEFT, padx=2)
             ext_entry.bind("<Button-3>", lambda e, ent=ext_entry: ent.delete(0, "end"))
+            # 拖曳事件
+            ext_entry.bind("<ButtonPress-1>", lambda e, idx=i: self._start_drag(e, idx, "ext"))
+            ext_entry.bind("<B1-Motion>", self._do_drag)
+            ext_entry.bind("<ButtonRelease-1>", self._stop_drag)
+            # 恢復舊資料
+            if i < len(old_exts):
+                ext_entry.insert(0, old_exts[i])
             self.extension_entries.append(ext_entry)
             
             dest_entry = tb.Entry(row, width=40, font=self.font)
             dest_entry.pack(side=LEFT, padx=2)
             dest_entry.bind("<Button-3>", lambda e, ent=dest_entry: ent.delete(0, "end"))
+            # 拖曳事件
+            dest_entry.bind("<ButtonPress-1>", lambda e, idx=i: self._start_drag(e, idx, "dest"))
+            dest_entry.bind("<B1-Motion>", self._do_drag)
+            dest_entry.bind("<ButtonRelease-1>", self._stop_drag)
+            # 恢復舊資料
+            if i < len(old_dests):
+                dest_entry.insert(0, old_dests[i])
             self.dest_entries.append(dest_entry)
             
             tb.Button(row, text="存放位置", command=lambda e=dest_entry: self.select_dest_folder(e)).pack(side=LEFT)
@@ -237,33 +231,19 @@ class AutoMoveApp:
             entry.delete(0, 'end')
             entry.insert(0, folder)
     
-    def _get_files(self, path, recursive=False):
+    def _get_files(self, path):
         """取得檔案列表"""
         files = []
-        if recursive:
-            for root, dirs, filenames in os.walk(path):
-                for f in filenames:
-                    rel = os.path.relpath(os.path.join(root, f), path)
-                    files.append(rel)
-                for d in dirs:
-                    rel = os.path.relpath(os.path.join(root, d), path)
-                    files.append(rel + "/")
-        else:
-            for f in os.listdir(path):
-                if os.path.isdir(os.path.join(path, f)):
-                    files.append(f + "/")
-                else:
-                    files.append(f)
+        for f in os.listdir(path):
+            if os.path.isdir(os.path.join(path, f)):
+                files.append(f + "/")
+            else:
+                files.append(f)
         return files
     
     def _match_pattern(self, filename, pattern):
         """匹配檔案"""
-        if self.regex_mode_var.get():
-            try:
-                return bool(re.search(pattern, filename, re.IGNORECASE))
-            except:
-                return False
-        elif pattern == "[資料夾]":
+        if pattern == "[資料夾]":
             return filename.endswith("/")
         elif pattern.startswith("."):
             return filename.lower().endswith(pattern.lower()) and not filename.endswith("/")
@@ -271,15 +251,13 @@ class AutoMoveApp:
             return pattern.lower() in filename.lower()
     
     def _resolve_dest_path(self, base_dest, filename):
-        """解析目的路徑（支援變數）"""
+        """解析目的路徑（建立當日資料夾）"""
         if not self.auto_subfolder_var.get():
             return base_dest
         
-        now = datetime.datetime.now()
-        dest = base_dest.replace("{YEAR}", str(now.year))
-        dest = dest.replace("{MONTH}", f"{now.month:02d}")
-        dest = dest.replace("{DAY}", f"{now.day:02d}")
-        dest = dest.replace("{EXT}", os.path.splitext(filename)[1][1:] if "." in filename else "other")
+        # 建立 YYYY-MM-DD 格式的資料夾
+        today = datetime.date.today().strftime("%Y-%m-%d")
+        dest = os.path.join(base_dest, today)
         
         if not os.path.exists(dest):
             os.makedirs(dest, exist_ok=True)
@@ -311,7 +289,7 @@ class AutoMoveApp:
             return
         
         try:
-            files = self._get_files(path, self.recursive_var.get())
+            files = self._get_files(path)
         except Exception as e:
             self.log(f"錯誤：{e}")
             return
@@ -340,31 +318,17 @@ class AutoMoveApp:
                 entry.delete(0, "end")
                 entry.insert(0, path)
     
-    def preview_move(self):
-        """預覽移動"""
-        src = self.source_entry.get().strip()
-        if not src or not os.path.isdir(src):
-            self.log("錯誤：來源路徑無效")
-            return
-        
-        self.log("========== 移動預覽 ==========")
-        preview = self._calculate_moves(src)
-        
-        if not preview:
-            self.log("沒有符合條件的檔案")
-            return
-        
-        for filename, dest in preview[:50]:
-            self.log(f"  {filename} → {dest}")
-        
-        if len(preview) > 50:
-            self.log(f"  ... 還有 {len(preview) - 50} 個項目")
-        
-        self.log(f"========== 共 {len(preview)} 個檔案 ==========")
+    def stop_all(self):
+        """停止所有動作"""
+        self._stop_flag = True
+        if self._countdown_after_id:
+            self.root.after_cancel(self._countdown_after_id)
+            self._countdown_after_id = None
+        self.log("已停止所有動作")
     
     def _calculate_moves(self, src):
         """計算要移動的檔案"""
-        files = self._get_files(src, self.recursive_var.get())
+        files = self._get_files(src)
         moves = []
         moved = set()
         
@@ -454,44 +418,82 @@ class AutoMoveApp:
             pass
     
     def undo_move(self):
-        """復原上次移動"""
+        """復原上次移動（含確認視窗）"""
         if not self._move_history:
             self.log("沒有可復原的移動記錄")
+            messagebox.showinfo("提示", "沒有可復原的移動記錄")
             return
         
-        batch = self._move_history.pop()
-        restored = 0
+        # 顯示復原預覽視窗
+        preview_win = tb.Toplevel(self.root)
+        preview_win.title("復原預覽")
+        preview_win.geometry("600x400")
+        preview_win.grab_set()
         
-        for current_path, original_path in reversed(batch):
-            try:
-                if os.path.exists(current_path):
-                    os.makedirs(os.path.dirname(original_path), exist_ok=True)
-                    shutil.move(current_path, original_path)
-                    self.log(f"復原：{os.path.basename(original_path)}")
-                    restored += 1
-            except Exception as e:
-                self.log(f"復原失敗：{e}")
+        tb.Label(preview_win, text="以下檔案將被復原：", font=('微軟正黑體', 12, 'bold')).pack(pady=10)
         
-        self.log(f"復原完成：{restored} 個檔案")
+        # 列表框架
+        list_frame = tb.Frame(preview_win)
+        list_frame.pack(fill='both', expand=True, padx=10, pady=5)
+        
+        text = tb.Text(list_frame, font=('Consolas', 9), wrap='none')
+        text.pack(side=LEFT, fill='both', expand=True)
+        
+        scrollbar_y = tb.Scrollbar(list_frame, orient="vertical", command=text.yview)
+        scrollbar_y.pack(side=LEFT, fill='y')
+        text.config(yscrollcommand=scrollbar_y.set)
+        
+        scrollbar_x = tb.Scrollbar(preview_win, orient="horizontal", command=text.xview)
+        scrollbar_x.pack(fill='x', padx=10)
+        text.config(xscrollcommand=scrollbar_x.set)
+        
+        # 顯示復原資訊
+        batch = self._move_history[-1]
+        for current_path, original_path in batch:
+            text.insert('end', f"{current_path}\n  → {original_path}\n\n")
+        
+        text.config(state='disabled')
+        
+        def do_undo():
+            batch = self._move_history.pop()
+            restored = 0
+            
+            for current_path, original_path in reversed(batch):
+                try:
+                    if os.path.exists(current_path):
+                        os.makedirs(os.path.dirname(original_path), exist_ok=True)
+                        shutil.move(current_path, original_path)
+                        self.log(f"復原：{os.path.basename(original_path)}")
+                        restored += 1
+                except Exception as e:
+                    self.log(f"復原失敗：{e}")
+            
+            self.log(f"復原完成：{restored} 個檔案")
+            preview_win.destroy()
+        
+        # 按鈕
+        btn_frame = tb.Frame(preview_win)
+        btn_frame.pack(pady=10)
+        tb.Button(btn_frame, text="確認復原", command=do_undo, bootstyle="success", width=12).pack(side=LEFT, padx=5)
+        tb.Button(btn_frame, text="取消", command=preview_win.destroy, bootstyle="secondary", width=12).pack(side=LEFT, padx=5)
     
     # ==================== 模板系統 ====================
     
     def _load_templates(self):
-        templates = DEFAULT_TEMPLATES.copy()
+        """載入使用者自訂模板"""
         if os.path.exists(TEMPLATES_FILE):
             try:
                 with open(TEMPLATES_FILE, "r", encoding="utf-8") as f:
-                    custom = json.load(f)
-                templates.update(custom)
+                    return json.load(f)
             except:
                 pass
-        return templates
+        return {}
     
     def _save_templates(self):
-        custom = {k: v for k, v in self._templates.items() if k not in DEFAULT_TEMPLATES}
+        """儲存所有模板"""
         try:
             with open(TEMPLATES_FILE, "w", encoding="utf-8") as f:
-                json.dump(custom, f, ensure_ascii=False, indent=2)
+                json.dump(self._templates, f, ensure_ascii=False, indent=2)
         except:
             pass
     
@@ -499,14 +501,19 @@ class AutoMoveApp:
         """開啟模板管理視窗"""
         win = tb.Toplevel(self.root)
         win.title("分類模板")
-        win.geometry("500x400")
+        win.geometry("500x450")
         win.grab_set()
         
-        # 模板列表
-        list_frame = tb.Frame(win)
-        list_frame.pack(fill='both', expand=True, padx=10, pady=10)
+        # 標題
+        tb.Label(win, text="分類模板管理", font=('微軟正黑體', 14, 'bold')).pack(pady=(10, 5))
+        tb.Label(win, text="在主程式設定好配置後，可儲存為模板重複使用", 
+                font=('微軟正黑體', 9)).pack(pady=(0, 5))
         
-        listbox = tk.Listbox(list_frame, font=('微軟正黑體', 11), height=12)
+        # 模板列表框架
+        list_frame = tb.Frame(win)
+        list_frame.pack(fill='both', expand=True, padx=15, pady=5)
+        
+        listbox = tk.Listbox(list_frame, font=('微軟正黑體', 10), height=10)
         listbox.pack(side=LEFT, fill='both', expand=True)
         
         scrollbar = tb.Scrollbar(list_frame, command=listbox.yview)
@@ -515,64 +522,129 @@ class AutoMoveApp:
         
         def refresh_list():
             listbox.delete(0, tk.END)
-            for name in self._templates:
-                listbox.insert(tk.END, name)
+            if not self._templates:
+                listbox.insert(tk.END, "（尚無模板）")
+            else:
+                for name in self._templates:
+                    template = self._templates[name]
+                    ext_count = len(template.get("extensions", []))
+                    listbox.insert(tk.END, f"{name} ({ext_count} 個副檔名)")
         
         def apply_template():
             sel = listbox.curselection()
-            if not sel:
+            if not sel or not self._templates:
+                messagebox.showinfo("提示", "請先選擇一個模板")
                 return
-            name = listbox.get(sel[0])
+            
+            # 取得真正的模板名稱（移除括號說明）
+            item = listbox.get(sel[0])
+            if item.startswith("（"):
+                return
+            name = item.rsplit(" (", 1)[0]
+            
             template = self._templates.get(name)
             if not template:
                 return
             
+            # 套用完整配置
+            config = template.get("config", {})
             exts = template.get("extensions", [])
-            self.kind_var.set(str(len(exts)))
+            dests = template.get("destinations", [])
+            
+            # 設定欄位數量
+            self.kind_var.set(str(max(len(exts), 1)))
             self.update_dynamic_fields()
             
+            # 填入副檔名
             for entry, ext in zip(self.extension_entries, exts):
                 entry.delete(0, "end")
                 entry.insert(0, ext)
             
+            # 填入目的路徑
+            for entry, dest in zip(self.dest_entries, dests):
+                entry.delete(0, "end")
+                entry.insert(0, dest)
+            
+            # 填入其他設定
+            if config.get("source"):
+                self.source_entry.delete(0, "end")
+                self.source_entry.insert(0, config.get("source", ""))
+            
+            self.move_delay_var.set(config.get("move_delay", "0"))
+            self.auto_close_var.set(config.get("auto_close", "0"))
+            self.recursive_var.set(config.get("recursive", False))
+            self.regex_mode_var.set(config.get("regex_mode", False))
+            self.auto_subfolder_var.set(config.get("auto_subfolder", False))
+            self.conflict_var.set(config.get("conflict", "skip"))
+            
             self.log(f"已套用模板：{name}")
             win.destroy()
         
-        def add_template():
-            name = simpledialog.askstring("新增模板", "模板名稱：", parent=win)
+        def save_current_config():
+            """儲存當前完整配置為模板"""
+            name = simpledialog.askstring("儲存模板", "請輸入模板名稱：", parent=win)
             if not name:
                 return
             
             exts = [e.get().strip() for e in self.extension_entries if e.get().strip()]
+            dests = [e.get().strip() for e in self.dest_entries]
+            
             if not exts:
-                messagebox.showwarning("警告", "請先在主介面設定副檔名")
+                messagebox.showwarning("警告", "請先在主介面設定至少一個副檔名")
                 return
             
-            self._templates[name] = {"extensions": exts, "description": "自訂模板"}
+            # 儲存完整配置
+            self._templates[name] = {
+                "extensions": exts,
+                "destinations": dests,
+                "config": {
+                    "source": self.source_entry.get().strip(),
+                    "move_delay": self.move_delay_var.get(),
+                    "auto_close": self.auto_close_var.get(),
+                    "recursive": self.recursive_var.get(),
+                    "regex_mode": self.regex_mode_var.get(),
+                    "auto_subfolder": self.auto_subfolder_var.get(),
+                    "conflict": self.conflict_var.get(),
+                },
+                "description": "完整配置模板"
+            }
             self._save_templates()
             refresh_list()
-            self.log(f"已新增模板：{name}")
+            self.log(f"已儲存模板：{name}（包含完整配置）")
         
         def delete_template():
             sel = listbox.curselection()
-            if not sel:
-                return
-            name = listbox.get(sel[0])
-            if name in DEFAULT_TEMPLATES:
-                messagebox.showwarning("警告", "無法刪除內建模板")
+            if not sel or not self._templates:
                 return
             
-            del self._templates[name]
-            self._save_templates()
-            refresh_list()
-            self.log(f"已刪除模板：{name}")
+            item = listbox.get(sel[0])
+            if item.startswith("（"):
+                return
+            name = item.rsplit(" (", 1)[0]
+            
+            if messagebox.askyesno("確認刪除", f"確定要刪除模板「{name}」嗎？"):
+                if name in self._templates:
+                    del self._templates[name]
+                    self._save_templates()
+                    refresh_list()
+                    self.log(f"已刪除模板：{name}")
         
-        # 按鈕
+        # 按鈕區域
         btn_frame = tb.Frame(win)
-        btn_frame.pack(pady=10)
-        tb.Button(btn_frame, text="套用", command=apply_template, bootstyle="success").pack(side=LEFT, padx=5)
-        tb.Button(btn_frame, text="新增", command=add_template, bootstyle="info").pack(side=LEFT, padx=5)
-        tb.Button(btn_frame, text="刪除", command=delete_template, bootstyle="danger").pack(side=LEFT, padx=5)
+        btn_frame.pack(pady=15)
+        
+        tb.Button(btn_frame, text="套用選中模板", command=apply_template, 
+                 bootstyle="success", width=14).pack(side=LEFT, padx=5)
+        tb.Button(btn_frame, text="儲存當前配置", command=save_current_config, 
+                 bootstyle="info", width=14).pack(side=LEFT, padx=5)
+        tb.Button(btn_frame, text="刪除", command=delete_template, 
+                 bootstyle="danger", width=8).pack(side=LEFT, padx=5)
+        
+        # 說明
+        hint_frame = tb.Frame(win)
+        hint_frame.pack(pady=(0, 10), padx=15, fill='x')
+        tb.Label(hint_frame, text="提示：模板會儲存副檔名、目的路徑及所有選項設定", 
+                font=('微軟正黑體', 9), foreground='gray').pack()
         
         refresh_list()
     
@@ -606,7 +678,7 @@ class AutoMoveApp:
         win.title("統計報表")
         win.geometry("400x350")
         
-        tb.Label(win, text=f"📊 總移動檔案：{self._stats['total']} 個", 
+        tb.Label(win, text=f"總移動檔案：{self._stats['total']} 個", 
                 font=('微軟正黑體', 14, 'bold')).pack(pady=15)
         
         tb.Label(win, text="每日統計（最近7天）：", font=('微軟正黑體', 11)).pack(anchor='w', padx=20)
@@ -642,8 +714,6 @@ class AutoMoveApp:
             self.kind_var.set(data.get("kind_var", "3"))
             self.move_delay_var.set(data.get("move_delay_var", "0"))
             self.auto_close_var.set(data.get("auto_close_var", "0"))
-            self.recursive_var.set(data.get("recursive", False))
-            self.regex_mode_var.set(data.get("regex_mode", False))
             self.auto_subfolder_var.set(data.get("auto_subfolder", False))
             self.conflict_var.set(data.get("conflict", "skip"))
             
@@ -671,8 +741,6 @@ class AutoMoveApp:
                 "kind_var": self.kind_var.get(),
                 "move_delay_var": self.move_delay_var.get(),
                 "auto_close_var": self.auto_close_var.get(),
-                "recursive": self.recursive_var.get(),
-                "regex_mode": self.regex_mode_var.get(),
                 "auto_subfolder": self.auto_subfolder_var.get(),
                 "conflict": self.conflict_var.get(),
                 "extensions": [e.get() for e in self.extension_entries],
@@ -723,11 +791,14 @@ class AutoMoveApp:
                 pass
     
     def _countdown(self, mode, seconds, callback):
-        if seconds <= 0:
-            callback()
+        if self._stop_flag or seconds <= 0:
+            if not self._stop_flag:
+                callback()
+            self._stop_flag = False
+            self._countdown_after_id = None
             return
         self.log(f"{mode}倒數：{seconds} 秒")
-        self.root.after(1000, lambda: self._countdown(mode, seconds - 1, callback))
+        self._countdown_after_id = self.root.after(1000, lambda: self._countdown(mode, seconds - 1, callback))
     
     def _start_auto_move(self):
         try:
@@ -743,6 +814,65 @@ class AutoMoveApp:
         if line_count > 1000:
             self.log_display.delete("1.0", f"{line_count - 500}.0")
         self.log_display.see('end')
+    
+    # ==================== 拖曳功能 ====================
+    
+    def _start_drag(self, event, idx, typ):
+        """開始拖曳欄位內容"""
+        self._drag_data["widget"] = event.widget
+        self._drag_data["index"] = idx
+        self._drag_data["type"] = typ
+        value = event.widget.get()
+        if value:
+            self._drag_data["tip"] = tip = tk.Toplevel(self.root)
+            tip.wm_overrideredirect(True)
+            tip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
+            label = tk.Label(tip, text=value[:30] + ("..." if len(value) > 30 else ""), 
+                           background="#ffffe0", relief="solid", borderwidth=1, 
+                           font=("微軟正黑體", 10))
+            label.pack(ipadx=5, ipady=2)
+    
+    def _do_drag(self, event):
+        """拖曳中更新提示位置"""
+        tip = self._drag_data.get("tip")
+        if tip:
+            tip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
+    
+    def _stop_drag(self, event):
+        """停止拖曳並交換欄位內容"""
+        if self._drag_data["widget"] is None:
+            return
+        
+        x, y = event.x_root, event.y_root
+        entries = self.extension_entries if self._drag_data["type"] == "ext" else self.dest_entries
+        target_idx = None
+        
+        # 尋找放置目標
+        for idx, entry in enumerate(entries):
+            ex = entry.winfo_rootx()
+            ey = entry.winfo_rooty()
+            ew = entry.winfo_width()
+            eh = entry.winfo_height()
+            if ex <= x <= ex + ew and ey <= y <= ey + eh:
+                target_idx = idx
+                break
+        
+        # 交換內容
+        if target_idx is not None and target_idx != self._drag_data["index"]:
+            src_entry = entries[self._drag_data["index"]]
+            dst_entry = entries[target_idx]
+            src_val = src_entry.get()
+            dst_val = dst_entry.get()
+            src_entry.delete(0, "end")
+            src_entry.insert(0, dst_val)
+            dst_entry.delete(0, "end")
+            dst_entry.insert(0, src_val)
+            self.log(f"已交換 {self._drag_data['type']} 欄位 {self._drag_data['index']+1} ↔ {target_idx+1}")
+        
+        # 清理
+        if self._drag_data.get("tip"):
+            self._drag_data["tip"].destroy()
+        self._drag_data = {"widget": None, "index": None, "type": None, "tip": None}
     
     # ==================== 排程與更新 ====================
     
@@ -820,12 +950,13 @@ class AutoMoveApp:
             pass
     
     def check_for_updates(self):
+        """檢查更新"""
         def check():
             try:
-                updater = UpdateManager(CURRENT_VERSION)
-                info = updater.check_for_updates()
+                version_mgr = VersionManager(CURRENT_VERSION, logger=self.log)
+                info = version_mgr.check_for_updates()
                 if info:
-                    self.root.after(0, lambda: UpdateDialog(self.root, updater, info))
+                    self.root.after(0, lambda: UpdateDialog(self.root, version_mgr, info, on_update_callback=self.root.quit))
                 else:
                     self.root.after(0, lambda: NoUpdateDialog(self.root, CURRENT_VERSION))
             except Exception as e:

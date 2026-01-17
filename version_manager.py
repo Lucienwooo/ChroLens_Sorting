@@ -610,6 +610,16 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyConti
         try:
             # 尋找更新日誌區塊（根據實際網頁結構調整）
             import re
+
+# 版本管理模組
+try:
+    from version_manager import VersionManager
+    from version_info_dialog import VersionInfoDialog
+    VERSION_MANAGER_AVAILABLE = True
+except ImportError:
+    print("版本管理模組未安裝，版本檢查功能將停用")
+    VERSION_MANAGER_AVAILABLE = False
+
             
             # 嘗試找到版本資訊區塊
             pattern = r'<h[23].*?>(.*?v?\d+\.\d+\.\d+.*?)</h[23]>(.*?)(?=<h[23]|$)'
@@ -632,3 +642,57 @@ Remove-Item -Path $MyInvocation.MyCommand.Path -Force -ErrorAction SilentlyConti
         except Exception as e:
             self.log(f"解析更新日誌失敗: {e}")
             return "解析失敗，請訪問官網查看。"
+
+# ===== 版本管理功能 =====
+def check_for_updates():
+    """檢查更新"""
+    if not VERSION_MANAGER_AVAILABLE:
+        try:
+            import tkinter.messagebox as messagebox
+            messagebox.showinfo("提示", "版本管理功能未啟用")
+        except:
+            print("版本管理功能未啟用")
+        return
+    
+    try:
+        version_manager = VersionManager(
+            current_version=VERSION,
+            logger=lambda msg: print(f"[版本管理] {msg}")
+        )
+        
+        dialog = VersionInfoDialog(
+            parent=root,
+            version_manager=version_manager,
+            current_version=VERSION,
+            on_update_callback=on_update_complete
+        )
+    except Exception as e:
+        try:
+            import tkinter.messagebox as messagebox
+            messagebox.showerror("錯誤", f"檢查更新失敗：{e}")
+        except:
+            print(f"檢查更新失敗：{e}")
+
+def on_update_complete():
+    """更新完成回調"""
+    try:
+        import tkinter.messagebox as messagebox
+        messagebox.showinfo("提示", "更新完成！請重新啟動應用程式。")
+    except:
+        print("更新完成！請重新啟動應用程式。")
+
+def show_about():
+    """顯示關於資訊"""
+    about_text = f"""ChroLens_Sorting
+版本: {VERSION}
+作者: Lucienwooo
+
+© 2025 Lucienwooo
+授權: GPL v3 + 商業授權"""
+    
+    try:
+        import tkinter.messagebox as messagebox
+        messagebox.showinfo(f"關於 ChroLens_Sorting", about_text)
+    except:
+        print(about_text)
+

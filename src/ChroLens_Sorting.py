@@ -4,6 +4,11 @@ ChroLens_Sorting 1.2 - 自動檔案整理工具
 新增功能：復原、預覽、正則、自動子資料夾、遞迴搜尋、重命名規則、通知、多設定檔、模板系統、統計報表
 """
 
+try:
+    from version_manager import VersionManager
+    from version_info_dialog import VersionInfoDialog
+except ImportError:
+    pass
 import os
 import shutil
 import re

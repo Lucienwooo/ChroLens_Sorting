@@ -1,2 +1,9 @@
-requests>=2.25.1
-gitpython>=3.1.14
+# ChroLens_Sorting 依賴套件
+# 自動生成於 2026-01-19
+
+packaging
+ttkbootstrap
+update_dialog
+update_manager
+version_manager
+webbrowser
